@@ -512,20 +512,20 @@ def main() -> None:
                     # Construct a human‑readable label showing name, item and quantity
                     return f"{row['name']} – {row['item']} (x{row['quantity']}) → {row['line_total']:.2f} €"
 
-                selected = st.selectbox(
+                # Original deletion mechanism replaced: persist selection via a key
+                selected_idx = st.selectbox(
                     "Seleziona ordine da eliminare (opzionale)",
                     options=options,
                     format_func=format_option,
                     index=0,
+                    key="selected_delete_index",
                 )
-                if selected is not None:
-                    if st.button("Elimina ordine selezionato"):
-                        # Drop the selected row and rewrite the CSV file
-                        df_orders = df_orders.drop(selected).reset_index(drop=True)
-                        df_orders.to_csv(ORDERS_FILE, index=False)
-                        st.success("Ordine eliminato.")
-                        # Refresh the page to reflect changes
-                        st.experimental_rerun()
+                delete_clicked = st.button("Elimina ordine selezionato")
+                if delete_clicked and selected_idx is not None:
+                    updated_df = df_orders.drop(selected_idx).reset_index(drop=True)
+                    updated_df.to_csv(ORDERS_FILE, index=False)
+                    st.success("Ordine eliminato.")
+                    st.experimental_rerun()
 
                 # Aggregate quantities and totals per product
                 agg = (
