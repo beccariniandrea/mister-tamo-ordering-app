@@ -488,11 +488,12 @@ def main() -> None:
             else:
                 save_order_to_csv(name.strip(), order_quantities)
                 st.success("Ordine inviato! Grazie per la tua scelta.")
-                # Reset the input quantities by clearing the stored values and rerunning the app
-                for key in list(st.session_state.keys()):
-                    if key.startswith("qty_"):
-                        st.session_state[key] = 0
-                st.experimental_rerun()
+                # Dopo aver salvato l'ordine mostriamo il messaggio di conferma.
+                # Non modifichiamo esplicitamente i valori di session_state perché
+                # assegnare a un widget esistente all'interno di una callback
+                # può generare errori StreamlitAPIException.  Se desideri
+                # resettare le quantità manualmente, basta ricaricare la pagina
+                # (Ctrl‑R) oppure chiudere e riaprire l'app.
 
     with view_col:
         if st.button("Mostra riepilogo ordini"):
