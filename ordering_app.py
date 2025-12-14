@@ -482,7 +482,10 @@ def main() -> None:
                 # (Ctrl‑R) oppure chiudere e riaprire l'app.
 
     with view_col:
-        if st.button("Mostra riepilogo ordini"):
+        # Use a persistent checkbox instead of a button so the summary remains
+        # visible across reruns (changing a select box triggers a rerun).
+        show_summary = st.checkbox("Mostra riepilogo ordini")
+        if show_summary:
             """
             Display a summary of all submitted orders and allow the organiser to
             optionally delete individual orders.  Each row of the orders file
