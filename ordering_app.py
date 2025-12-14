@@ -30,21 +30,7 @@ from collections import defaultdict
 # choose “Open image in new tab”, then copy the URL from the address bar
 # and paste it here.  Make sure the URL begins with "https" so that
 # Streamlit can load it.
-category_images: dict[str, str | None] = {
-    # To display a photo at the top of a category expander add a key here
-    # whose value is the URL of a JPEG/PNG hosted on the web (HTTPS only).
-    # You can copy these URLs directly from the Mister Tamo Google Sites
-    # menu: right‑click a product photo, choose “Open image in new tab” and
-    # copy the resulting address from your browser’s address bar.  Paste
-    # that address here as a string.  Streamlit will fetch the image
-    # dynamically without downloading it into the repository.
-    #
-    # Below are a couple of example entries demonstrating the syntax.
-    # Remove or replace them with your own links.
-    "Caffetteria": "https://lh3.googleusercontent.com/your_coffee_image.jpg",  # example coffee photo
-    "Dolci – monoporzioni e torte": "https://lh3.googleusercontent.com/your_dolci_image.jpg",  # example dessert photo
-    # Add more categories and their corresponding image URLs as needed.
-}
+category_images: dict[str, str | None] = {}
 
 # Path to the CSV file used for aggregating orders across sessions.  When running
 # on Streamlit Cloud the working directory is persistent for the duration of
@@ -497,12 +483,50 @@ def main() -> None:
 
     with view_col:
         if st.button("Mostra riepilogo ordini"):
+            """
+            Display a summary of all submitted orders and allow the organiser to
+            optionally delete individual orders.  Each row of the orders file
+            corresponds to a single line item from a user's order.  The
+            interface below lists all rows and a drop‑down menu to select one
+            for removal.  Upon deletion the CSV is overwritten with the
+            remaining rows and the summary tables are refreshed.
+            """
             df_orders = load_orders_dataframe()
             if df_orders is None or df_orders.empty:
                 st.info("Nessun ordine inviato finora.")
             else:
                 st.subheader("Elenco ordini inviati")
                 st.dataframe(df_orders)
+
+                # Provide a selectbox to choose an order line to delete.  The
+                # options consist of the integer indices of df_orders.  We
+                # prepend a sentinel None value so the user can choose not
+                # to delete anything.  The format_func shows a readable
+                # description for each row.
+                indices = df_orders.index.tolist()
+                options = [None] + indices
+                def format_option(idx):
+                    if idx is None:
+                        return "Nessuno"
+                    row = df_orders.loc[idx]
+                    # Construct a human‑readable label showing name, item and quantity
+                    return f"{row['name']} – {row['item']} (x{row['quantity']}) → {row['line_total']:.2f} €"
+
+                selected = st.selectbox(
+                    "Seleziona ordine da eliminare (opzionale)",
+                    options=options,
+                    format_func=format_option,
+                    index=0,
+                )
+                if selected is not None:
+                    if st.button("Elimina ordine selezionato"):
+                        # Drop the selected row and rewrite the CSV file
+                        df_orders = df_orders.drop(selected).reset_index(drop=True)
+                        df_orders.to_csv(ORDERS_FILE, index=False)
+                        st.success("Ordine eliminato.")
+                        # Refresh the page to reflect changes
+                        st.experimental_rerun()
+
                 # Aggregate quantities and totals per product
                 agg = (
                     df_orders.groupby("item")
