@@ -15,7 +15,87 @@ Share the resulting URL with your friends so they can add their orders.
 """
 
 import streamlit as st
+import pandas as pd
+import os
+import datetime
 from collections import defaultdict
+
+# Optional mapping of category names to image URLs.  If a category has an
+# associated image (for example, a representative photo from the Mister Tamo
+# website or another royalty‑free source), you can specify the URL here.
+# The app will display the image at the top of the expander for that
+# category.  If a category is missing or set to None the image will not
+# be shown.  Note: to embed pictures from the original menu on Google
+# Sites you can right‑click on the desired image in your browser,
+# choose “Open image in new tab”, then copy the URL from the address bar
+# and paste it here.  Make sure the URL begins with "https" so that
+# Streamlit can load it.
+category_images: dict[str, str | None] = {
+    # To display a photo at the top of a category expander add a key here
+    # whose value is the URL of a JPEG/PNG hosted on the web (HTTPS only).
+    # You can copy these URLs directly from the Mister Tamo Google Sites
+    # menu: right‑click a product photo, choose “Open image in new tab” and
+    # copy the resulting address from your browser’s address bar.  Paste
+    # that address here as a string.  Streamlit will fetch the image
+    # dynamically without downloading it into the repository.
+    #
+    # Below are a couple of example entries demonstrating the syntax.
+    # Remove or replace them with your own links.
+    "Caffetteria": "https://lh3.googleusercontent.com/your_coffee_image.jpg",  # example coffee photo
+    "Dolci – monoporzioni e torte": "https://lh3.googleusercontent.com/your_dolci_image.jpg",  # example dessert photo
+    # Add more categories and their corresponding image URLs as needed.
+}
+
+# Path to the CSV file used for aggregating orders across sessions.  When running
+# on Streamlit Cloud the working directory is persistent for the duration of
+# your app instance, so this file will accumulate all submitted orders.  If you
+# redeploy the app the file will be reset.
+ORDERS_FILE = "orders.csv"
+
+def save_order_to_csv(name: str, order_quantities: dict) -> None:
+    """Append the current user's order to a CSV file.
+
+    Each row in the CSV represents a single menu item and includes the name
+    provided by the user, the item name, price, quantity ordered, the
+    line total and a timestamp.  If the CSV does not yet exist it will be
+    created with the appropriate header.
+    """
+    rows = []
+    timestamp = datetime.datetime.now().isoformat(timespec="seconds")
+    for (item_name, price), qty in order_quantities.items():
+        if qty <= 0:
+            continue
+        rows.append(
+            {
+                "name": name,
+                "item": item_name,
+                "price": price,
+                "quantity": qty,
+                "line_total": round(price * qty, 2),
+                "timestamp": timestamp,
+            }
+        )
+    if not rows:
+        return
+    new_df = pd.DataFrame(rows)
+    if os.path.exists(ORDERS_FILE):
+        # Append to existing orders
+        existing = pd.read_csv(ORDERS_FILE)
+        combined = pd.concat([existing, new_df], ignore_index=True)
+        combined.to_csv(ORDERS_FILE, index=False)
+    else:
+        # Write a new orders file with header
+        new_df.to_csv(ORDERS_FILE, index=False)
+
+
+def load_orders_dataframe() -> pd.DataFrame | None:
+    """Load all orders from the CSV, if it exists, otherwise return None."""
+    if os.path.exists(ORDERS_FILE):
+        try:
+            return pd.read_csv(ORDERS_FILE)
+        except Exception:
+            return None
+    return None
 
 
 def build_menu() -> dict:
@@ -345,9 +425,22 @@ def main() -> None:
     # Use a defaultdict to collect item quantities across categories
     order_quantities: dict[str, int] = defaultdict(int)
 
-    # Iterate over categories, displaying each inside an expander for clarity
+    # Iterate over categories, displaying each inside an expander.  If a
+    # representative image URL is defined in `category_images`, it will be
+    # displayed at the top of the expander.  This allows you to embed
+    # photos from the Mister Tamo website or other sources directly into
+    # the app without downloading them.  To add an image, populate
+    # `category_images` with the category name and the desired URL.
     for category, items in menu.items():
         with st.expander(category, expanded=False):
+            # Show a representative image for the category if available
+            img_url = category_images.get(category)
+            if img_url:
+                try:
+                    st.image(img_url, use_column_width=True)
+                except Exception:
+                    # If the image cannot be loaded, silently ignore
+                    pass
             st.write(f"**{category}**")
             for item_name, price in items:
                 key = f"qty_{category}_{item_name}"
@@ -357,21 +450,68 @@ def main() -> None:
                 if qty:
                     order_quantities[(item_name, price)] += int(qty)
 
-    # Compute summary
+    # Ask the user for their name before computing the summary.  The name is
+    # required when submitting the order so that it can be identified in the
+    # aggregated summary.
+    name = st.text_input(
+        "Inserisci il tuo nome (obbligatorio per inviare l'ordine)",
+        value="",
+        help="Il tuo nome verrà usato per identificare l'ordine nel riepilogo finale."
+    )
+
+    # Compute summary for the current selection
     st.header("Riepilogo ordine")
     if order_quantities:
         total = 0.0
         summary_lines = []
         for (item_name, price), qty in order_quantities.items():
+            if qty <= 0:
+                continue
             line_total = price * qty
             total += line_total
             summary_lines.append(
-                f"{item_name} × {qty} → {line_total:.2f} €"
+                f"{item_name} × {qty} → {line_total:.2f}\u00a0€"
             )
         st.markdown("\n".join(summary_lines))
-        st.markdown(f"**Totale:** {total:.2f} €")
+        st.markdown(f"**Totale:** {total:.2f}\u00a0€")
     else:
         st.info("Nessun prodotto selezionato. Usa i menu per aggiungere articoli al tuo ordine.")
+
+    # Buttons for submitting the order and viewing the aggregated summary
+    submit_col, view_col = st.columns(2)
+    with submit_col:
+        if st.button("Invia ordine"):
+            if not name.strip():
+                st.warning("Per inviare l'ordine devi inserire il tuo nome.")
+            elif not order_quantities:
+                st.warning("Seleziona almeno un prodotto prima di inviare l'ordine.")
+            else:
+                save_order_to_csv(name.strip(), order_quantities)
+                st.success("Ordine inviato! Grazie per la tua scelta.")
+                # Reset the input quantities by clearing the stored values and rerunning the app
+                for key in list(st.session_state.keys()):
+                    if key.startswith("qty_"):
+                        st.session_state[key] = 0
+                st.experimental_rerun()
+
+    with view_col:
+        if st.button("Mostra riepilogo ordini"):
+            df_orders = load_orders_dataframe()
+            if df_orders is None or df_orders.empty:
+                st.info("Nessun ordine inviato finora.")
+            else:
+                st.subheader("Elenco ordini inviati")
+                st.dataframe(df_orders)
+                # Aggregate quantities and totals per product
+                agg = (
+                    df_orders.groupby("item")
+                    .agg(quantita=("quantity", "sum"), totale=("line_total", "sum"))
+                    .reset_index()
+                )
+                st.subheader("Riepilogo per prodotto")
+                st.table(agg)
+                totale_complessivo = agg["totale"].sum()
+                st.markdown(f"**Totale complessivo degli ordini:** {totale_complessivo:.2f}\u00a0€")
 
 
 if __name__ == "__main__":
